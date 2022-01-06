@@ -6,7 +6,8 @@ from scipy import stats as st
 from pandas import DataFrame as DF
 from pandas import HDFStore as HDF
 import matplotlib.pyplot as plt
-
+#Note that current version of the code is developed with focus on 2-country models.
+#There might be some bugs for models with different number of countries, especially in Analysis section.
 
 # parameters
 # overall
@@ -2601,7 +2602,7 @@ class Visual:
         plt.close()    
     
     
-    def plot_circles(radii, spacing = 1, grid = None,
+    def plot_circles(radii, spacing = 1, grid = None,  # actually diameters
                      no_rows = 3, no_cols = 3,
                      x_ticks = None, y_ticks = None,
                      x_label = None, y_label = None,
@@ -2643,12 +2644,37 @@ class Visual:
         
     def curve(series1, series2, 
               marker = "o-", individually = True, 
-              standard = True, size = (12,5),
+              standard = True, size = (12,5), grid = True,
               title = "Phillips curve",
               x_label = "unemployment", y_label = "inflation",
+              both_curves = False, x_lims = None, y_lims = None,
              path = None):
         """Plots 2-D plane of given series."""
-        if not individually:
+        if both_curves:
+            titles = ["Phillips curve", "Beveridge curve"]
+            y_labels = y_label
+            N = 2  # number of subplots
+            M =  1      # number of rows                  int(str(N)+str(i//2+1)+str(i%2+1))
+            fig = plt.figure(figsize = size)
+            plots = [fig.add_subplot(M,2,i+1) for i in range(N)]
+            for i, chart in enumerate(plots):
+                if grid:
+                    chart.grid()
+                chart.set_title(titles[i])
+                chart.set_xlabel(x_label)
+                chart.set_ylabel(y_labels[i])
+                chart.plot(series1[i], series2[i], marker)
+                if standard:
+                    chart.set_xlim([0, 0.3])            # x axis from 0 to .3
+                    chart.set_ylim([-0.1, 0.3])            # y axis from 0 to .2
+                if x_lims is not None:
+                    chart.set_xlim(x_lims[i]) 
+                if y_lims is not None:
+                    chart.set_ylim(y_lims[i])
+            fig.suptitle(title)
+            fig.subplots_adjust(hspace = 0.7)
+             
+        elif not individually:
             plt.rcParams["figure.figsize"] = size
             xs = list(zip(*series1))
             ys = list(zip(*series2))
@@ -2732,7 +2758,7 @@ class Visual:
         fig.suptitle(sup_title) 
         L = M*N  
         if x_labels is None:
-            x_labels = ["variable"]*L
+            x_labels = ["month"]*L
         if y_labels is None:
             y_labels = ["value"]*L
         if titles is None:
@@ -3073,6 +3099,7 @@ class Visual:
 
 
 plot = Visual.plot
+plot2 = Visual.plot2
 curve = Visual.curve
 whiskers = Visual.whiskers
 histogram = Visual.histogram
@@ -3973,13 +4000,28 @@ class Analysis:
             self.ind_correlations[var1 + "-" + var2] = all_ind_corrs
             self.correlations[var1 + "-" + var2] = corrs_stats
         return all_ind_corrs, corrs_stats     
-              
+
+
+    def make_BC_indi_metrics(self, measure2 = False): 
+        metric = lambda indics: 1-sum(np.abs(indics[0] - indics[1]))/len(indics[0])
+        indi_measures = [[metric(sim) for sim in scenario] for scenario in self.recs_indicators]
+        self.BC_indi_metrics = [(round2(np.mean(scenario),1),round2(np.min(scenario),1),
+                                 round2(np.median(scenario),1), round2(np.max(scenario),1), 
+                                 round2(np.std(scenario),2)) for scenario in indi_measures]
+        if measure2:# better measure: calculate rate of crises intersection for both countries and average them
+            metric = lambda ind1, ind2: sum([1 for res in ind1+ind2 if res == 2])/sum(ind1)
+            indi_measures = [[(metric(sim[0],sim[1])+metric(sim[1],sim[0]))/2 for sim in scenario] for scenario in self.recs_indicators]
+            self.BC_indi_metrics2 = [(round2(np.mean(scenario),1),round2(np.min(scenario),1),
+                                 round2(np.median(scenario),1), round2(np.max(scenario),1), 
+                                 round2(np.std(scenario),2)) for scenario in indi_measures]
+
     
     def analyze_all(self, recs_cond = 0.03, recs_percentile = 25, complete = True):
         """Analyze everything."""
         self.analyze_recs(recs_cond, recs_percentile)
         self.make_global_crises()
         self.get_averages()
+        self.make_BC_indi_metrics()
         if complete:
             basic_vs = ["inflation_y", "mean_real_wage_m", "total_export_rates_m",
                         "total_import_rates_m", "total_trade_balances_m", "excessive_debt_rate_m",
@@ -3990,12 +4032,13 @@ class Analysis:
             self.get_averages(data = 1)
             self.get_averages(data = 2)
             
-    
+                
     def plot_recs(self, scenarios = "all", sims = [0], countries = "all", 
                   y_lim = 0.75,  length = 1380,
                   marker = "-", grid = True, size = (10,4),
-                  x_label = "period", y_label = "value", 
+                  x_label = "month", y_label = "employment rate", 
                   titles = None, legends = None,
+                  use_plot2 = True, y2_lim = [-0.1, 0.4], y2_label = "inflation rate", marker2 = "-",
                   path = None):
         if scenarios == "all":
             scenarios = [i for i in range(self.no_scens)]
@@ -4005,7 +4048,10 @@ class Analysis:
             iii = path.find(".")
         for sc_i, scenario in enumerate(scenarios):
             for sim_i, simulation in enumerate(sims):
-                infl = [np.array(cc)+1 for cc in y_to_m(self.data_list[scenario][simulation]["inflation_y"], length)]
+                if use_plot2:
+                    infl =  y_to_m(self.data_list[scenario][simulation]["inflation_y"], length)
+                else:
+                    infl = [np.array(cc)+1 for cc in y_to_m(self.data_list[scenario][simulation]["inflation_y"], length)]
                 for cc_i, country in enumerate(countries[scenario]):
                     infl_now = infl[country]
                     empl = self.data_list[scenario][simulation]["employment"].means()[country]
@@ -4022,16 +4068,32 @@ class Analysis:
                         title = titles[sc_i][sim_i][cc_i]
                     
                     if legends is None:
-                        legend = ["employment rate", "yearly inflation", "crisis borders", "bank bankruptcy"]
+                        if use_plot2:
+                            legend1 = ["employment rate", "crisis borders", "bank bankruptcy"]
+                            legend2 = ["yearly inflation"]
+                        else:
+                            legend = ["employment rate", "yearly inflation", "crisis borders", "bank bankruptcy"]
                     else:
                         legend = legends[sc_i][sim_i][cc_i]
+                        if use_plot2:
+                            legend1 = legend[:-1]
+                            legend2 = legend[-1:]
                     
                     if path is None:
                         path2 = path
                     else:
                         path2 = path[:iii] + "_" + str(scenario) + "_" + str(country) + path[iii:]
                     
-                    plot([empl] + [infl_now] + [marks] + [marks2], marker = marker,
+                    if use_plot2: 
+                        plot2([empl]  + [marks] + [marks2], marker = marker,
+                              title = title, legend = legend1,
+                              grid = grid,  size = size,
+                              x_label = x_label, y_label = y_label,
+                              series2 = [infl_now], y2_label = y2_label,
+                              y2_lim = y2_lim, legend2 = legend2, marker2 = marker2,
+                              path = path2)
+                    else:
+                        plot([empl] + [infl_now] + [marks] + [marks2], marker = marker,
                          title = title, legend = legend, 
                          grid = grid,  size = size,
                          x_label = x_label, y_label = y_label,
@@ -4040,8 +4102,10 @@ class Analysis:
     def plot_recovery(self, scenarios = "all", sims = [0], countries = "all", 
                       y_lim = 0.6,  length = 1380,
                       marker = "-", grid = True, size = (10,4),
-                      x_label = "period", y_label = "value", 
+                      x_label = "month", y_label = "value", 
                       titles = None, legends = None,
+                      use_plot2 = True,  y_lim_plot2 = [0.7, 1.1], y2_lim = [0.1, 1.4],
+                      y2_label = "exc. debt rate/mean-divided real wage", marker2 = "-",
                       path = None):
         if scenarios == "all":
             scenarios = [i for i in range(self.no_scens)]
@@ -4070,14 +4134,32 @@ class Analysis:
                     else:
                         title = titles[sc_i][sim_i][cc_i]
                     if legends is None:
-                        legend = ["employment r.", "exc. debt rate", "real_wage", "crisis borders"]
+                        if use_plot2:
+                            legend1 = ["employment r.", "crisis borders"]
+                            legend2 = ["exc. debt rate", "mean-divided real wage"]
+                        else:
+                            legend = ["employment r.", "exc. debt rate", "mean-divided real wage", "crisis borders"]
                     else:
                         legend = legends[sc_i][sim_i][cc_i]
+                        if use_plot2:
+                            legend1 = legend[0:2]
+                            legend2 = legend[2:]
                     if path is None:
                         path2 = path
                     else:
                         path2 = path[:iii] + "_" + str(scenario) + "_" + str(country) + path[iii:]
-                    plot([empl] + [data_dict["excessive_debt_rate_m"][country]] +
+                    
+                    if use_plot2: 
+                        if y_label == "value":
+                            y_label = "employment rate"
+                        plot2([empl]  #+ [tbs_rate] +[export_rate] + [import_rate]
+                              + [marks] , marker = marker, grid = grid, title = title, y_lim = y_lim_plot2,
+                              legend = legend1, size = size, x_label = x_label, y_label = y_label,
+                              series2 = [data_dict["excessive_debt_rate_m"][country]] + [wage_rate],
+                              legend2 = legend2, y2_lim = y2_lim, y2_label = y2_label, marker2 = marker2,
+                              path = path2)
+                    else:
+                        plot([empl] + [data_dict["excessive_debt_rate_m"][country]] +
                          [wage_rate] #+ [tbs_rate] +[export_rate] + [import_rate]
                          + [marks] , marker = marker, grid = grid, title = title, 
                          legend = legend, size = size, x_label = x_label, y_label = y_label,
@@ -4086,8 +4168,10 @@ class Analysis:
     def plot_deleveraging(self, scenarios = "all", sims = [0], countries = "all", 
                           y_lim = 0.1,  length = 1380,
                           marker = "-", grid = True, size = (10,4),
-                          x_label = "period", y_label = "value", 
+                          x_label = "month", y_label = "value", 
                           titles = None, legends = None,
+                          use_plot2 = True,  y_lim_plot2 = [0.7, 1.1], y2_lim = [0.1, 1.4],
+                          y2_label = "firm optimism/self-fin. r./exc. debt r.", marker2 = "-",
                           path = None):
         if scenarios == "all":
             scenarios = [i for i in range(self.no_scens)]
@@ -4107,14 +4191,33 @@ class Analysis:
                     else:
                         title = titles[sc_i][sim_i][cc_i]
                     if legends is None:
-                        legend = ["employment r.", "f-sentiment", "self-fin. ratio", "exc. debt rate", "crisis borders"]
+                        if use_plot2:
+                            legend1 = ["employment r.", "crisis borders"]
+                            legend2 = ["firm optimism", "self-fin. ratio", "exc. debt rate"]
+                        else:
+                            legend = ["employment r.", "firm optimism", "self-fin. ratio", "exc. debt rate", "crisis borders"]
                     else:
                         legend = legends[sc_i][sim_i][cc_i]
+                        if use_plot2:
+                            legend1 = legend[:2]
+                            legend2 = legend[2:]
                     if path is None:
                         path2 = path
                     else:
                         path2 = path[:iii] + "_" + str(scenario) + "_" + str(country) + path[iii:]
-                    plot([empl] + [data_dict["firm_sentiment"].means()[country]] 
+                        
+                    if use_plot2:
+                        if y_label == "value":
+                            y_label = "employment rate"
+                        plot2([empl]+ [marks],
+                             series2 = [data_dict["firm_sentiment"].means()[country]] 
+                             + [data_dict["self_financing_ratio_m"][country]] + [data_dict["excessive_debt_rate_m"][country]],
+                             marker = marker, grid = grid, title = title, legend = legend1,
+                             x_label = x_label, y_label = y_label, size = size, y_lim = y_lim_plot2,
+                             legend2 = legend2, y2_lim = y2_lim, y2_label = y2_label, marker2 = marker2,
+                             path = path2)
+                    else:
+                        plot([empl] + [data_dict["firm_sentiment"].means()[country]] 
                          + [data_dict["self_financing_ratio_m"][country]] + [data_dict["excessive_debt_rate_m"][country]]
                          + [marks] , marker = marker, grid = grid, title = title,
                          x_label = x_label, y_label = y_label, size = size,
@@ -4123,8 +4226,10 @@ class Analysis:
     def plot_trading(self, scenarios = "all", sims = [0], countries = "all",
                      y_lim = 0.7,  length = 1380,
                      marker = "-", grid = True, size = (10,4),
-                    x_label = "period", y_label = "value", 
+                    x_label = "month", y_label = "value", 
                     titles = None, legends = None,
+                    use_plot2 = True,  y2_lim = [-0.5, 0.1], y_lim_plot2 = [0.7, 1],
+                    y2_label = "trade balances/consumption", marker2 = "-",
                     path = None):
         if scenarios == "all":
             scenarios = [i for i in range(self.no_scens)]
@@ -4136,7 +4241,10 @@ class Analysis:
             for sim_i, simulation in enumerate(sims):
                 data_dict = self.data_list[scenario][simulation]
                 trade0 = ratios(data_dict["total_trade_balances_m"], data_dict["cons"].sums())
-                trade = [np.array(trade0[cc])+1 for cc in countries[scenario]]
+                if use_plot2:
+                    trade = [trade0[cc] for cc in countries[scenario]]
+                else:
+                    trade = [np.array(trade0[cc])+1 for cc in countries[scenario]]
                 empl0 = data_dict["employment"].means()
                 empl = [empl0[cc] for cc in countries[scenario]]
                 marks_list = []
@@ -4149,9 +4257,14 @@ class Analysis:
                 else:
                     title = titles[sc_i][sim_i]
                 if legends is None:
-                    legend = ["employment C" + str(cc) for cc in countries[scenario]] + \
-                    ["trade bal./consumption C" + str(cc) for cc in countries[scenario]] + \
-                    ["crisis borders C" + str(cc) for cc in countries[scenario]]    
+                    if use_plot2:
+                        legend1 = ["employment C" + str(cc) for cc in countries[scenario]] + \
+                        ["crisis borders C" + str(cc) for cc in countries[scenario]]  
+                        legend2 = ["trade bal./consumption C" + str(cc) for cc in countries[scenario]]
+                    else:
+                        legend = ["employment C" + str(cc) for cc in countries[scenario]] + \
+                        ["trade bal./consumption C" + str(cc) for cc in countries[scenario]] + \
+                        ["crisis borders C" + str(cc) for cc in countries[scenario]]    
                 else:
                     legend = legends[sc_i][sim_i]
                         
@@ -4159,9 +4272,19 @@ class Analysis:
                     path2 = path
                 else:
                     path2 = path[:iii] + "_" + str(scenario) + path[iii:]
-                plot(empl + trade + marks_list, marker = marker, grid = grid, title = title,
-                     x_label = x_label, y_label = y_label, size = size,
-                     legend = legend, path = path2)
+                
+                if use_plot2:
+                    if y_label == "value":
+                        y_label = "employment rate"
+                    plot2(empl  + marks_list, series2 = trade,
+                          marker = marker, grid = grid, title = title,
+                          x_label = x_label, y_label = y_label, size = size, legend = legend1, y_lim = y_lim_plot2,
+                          legend2 = legend2, y2_lim = y2_lim, y2_label = y2_label, marker2 = marker2,
+                          path = path2)
+                else:
+                    plot(empl + trade + marks_list, marker = marker, grid = grid, title = title,
+                         x_label = x_label, y_label = y_label, size = size,
+                         legend = legend, path = path2)
                 
     def recs_whiskers(self, measure = "lengths", scenarios = "all", countries = "all", 
                       global_crises = False, piecewise = False, 
@@ -4266,8 +4389,8 @@ class Analysis:
             data = self.special_averages[variable]
             #cap_note = ""
         
-        tables = [DF({"min average": data[0][i], "mean average": data[1][i], "max average": data[2][i], 
-                      "std of average": data[3][i],
+        tables = [DF({"min": data[0][i], "mean": data[1][i], "max": data[2][i], 
+                      "std": data[3][i],
                       "mean inner std": data[4][i], "std of inner std": data[5][i]}) for i in scenarios]
         if folder is None:
                 folder = 'd:\moje_dokumenty\Desktop\diplomka\model\\text parts\\tables\\'
@@ -4585,7 +4708,7 @@ class Analysis:
     
     def corrs_table(self, vars1, vars2 = "def", types1 = "def", types2 = "def",
                     across = "def", countries = "all", scenarios = "all", sims = "all",
-                    save = True,
+                    save = True, indi_metric = True,
                     folder = None, show = True,
                     note = "", caption = None):
         """Makes table of correlation coeficients. Inputs should be lists of variable pairs and related info.
@@ -4617,7 +4740,11 @@ class Analysis:
             var_name = var1 + "-" + var2
             var_names.append(var_name)
             if var1 == "crisis indicators":    #######
-                data = self.BC_synchronizations
+                if indi_metric:
+                    data = self.BC_indi_metrics
+                    var1 = "metric of crisis indicators"
+                else:
+                    data = self.BC_synchronizations
             
             else:
                 data = self.make_correlations(var1, var2, type1, type2,
@@ -4625,6 +4752,8 @@ class Analysis:
                                               save)[1]
             if acr:   # append a list of 1-row dataframes
                 var_name = var1 + " across*"
+                if var1 == "metric of crisis indicators":
+                    var_name = "metric of BC synchronization"
                 make_note = True
                 if tables == []:
                         mmm = var_name
@@ -4681,11 +4810,13 @@ class Analysis:
             print(final)
     
     
-    def export_tables(self, print_export_rates = True):
+    
+    def export_tables(self, path = 'd:\moje_dokumenty\Desktop\diplomka\model\\text parts\\tables\\', 
+                      print_export_rates = True, print_tests = True):
         if "DF" not in globals():
             global DF
             from pandas import DataFrame as DF
-        base_path = 'd:\moje_dokumenty\Desktop\diplomka\model\\text parts\\tables\\' + self.name
+        base_path = path + self.name
         base_path = create_folder(base_path)
         #for i, scenario in enumerate(self.data_list):
             #path = base_path + "\\" + str(i)
@@ -4696,7 +4827,12 @@ class Analysis:
         self.stats_table("inflation_y", folder = base_path + "\\", show = 0)
         self.stats_table("total_export_rates_y", folder = base_path + "\\", show = 0)
         self.recs_table(folder = base_path + "\\", show = 0)
+        self.corrs_table(["crisis indicators","employment"],folder = base_path + "\\", note = "empl_BC_sync", show = 0)
         self.base_path = base_path
+        if print_tests:
+            for measure in ["L-value","bottoms","lengths","time","count"]:
+                self.test_table(measure, folder = base_path + "\\", show = 0,
+                                note = "_" + str(measure), caption = self.name + " " + str(measure) + " t-tests")
         if print_export_rates:
             file = open(base_path + "\\mean_exp_rates.txt","w")
             mean_exp_rates = self.averages["total_export_rates_m"][1]
