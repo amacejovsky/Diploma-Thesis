@@ -1,4 +1,4 @@
-# Diploma-Thesis
+# Diploma Thesis
 
 Codes of the model and corresponding analysis tools, jupyter notebooks with execution of simulations and analyses of results, and set of simulated data examples
 for diploma thesis 
